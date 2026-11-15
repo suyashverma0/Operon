@@ -1,0 +1,19 @@
+{
+  "customers": [
+    {"id":1,"name":"Sharma ji","balance":1300},
+    {"id":2,"name":"Verma ji","balance":3200},
+    {"id":3,"name":"Gupta aunty","balance":650},
+    {"id":4,"name":"Raju","balance":0},
+    {"id":5,"name":"Mishra ji","balance":4100},
+    {"id":6,"name":"Pooja didi","balance":900}
+  ],
+  "items": [
+    {"id":1,"name":"Aata","unit":"bag","stock":3,"threshold":5,"low":true},
+    {"id":2,"name":"Chawal","unit":"kg","stock":40,"threshold":15,"low":false},
+    {"id":3,"name":"Cheeni","unit":"kg","stock":8,"threshold":10,"low":true},
+    {"id":4,"name":"Tel (Fortune)","unit":"litre","stock":12,"threshold":6,"low":false},
+    {"id":5,"name":"Dal (Toor)","unit":"kg","stock":4,"threshold":8,"low":true},
+    {"id":6,"name":"Maggi","unit":"packet","stock":2,"threshold":12,"low":true}
+  ],
+  "summary": {"totalUdhaar":10150,"paymentsToday":1200,"lowStockCount":4}
+}
