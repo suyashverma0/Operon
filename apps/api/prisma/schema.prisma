@@ -1,0 +1,122 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Store {
+  id          String   @id @default(uuid())
+  name        String
+  ownerName   String?
+  phone       String?
+  currency    String   @default("INR")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users            User[]
+  customers        Customer[]
+  products         Product[]
+  transactions     Transaction[]
+  stockAdjustments StockAdjustment[]
+  auditLogs        AuditLog[]
+}
+
+model User {
+  id           String   @id @default(uuid())
+  storeId      String
+  name         String
+  email        String?  @unique
+  phone        String?
+  role         String   @default("OWNER")
+  passwordHash String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  store        Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+}
+
+model Customer {
+  id             String   @id @default(uuid())
+  storeId        String
+  name           String
+  phone          String?
+  address        String?
+  currentBalance Float    @default(0.0) // positive = customer owes store (udhaar)
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  store          Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  transactions   Transaction[]
+
+  @@index([storeId, name])
+}
+
+model Product {
+  id             String   @id @default(uuid())
+  storeId        String
+  name           String
+  unit           String   @default("piece") // kg, litre, piece, packet
+  currentStock   Float    @default(0.0)
+  minStockAlert  Float    @default(5.0)
+  salePrice      Float    @default(0.0)
+  costPrice      Float    @default(0.0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  store            Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  stockAdjustments StockAdjustment[]
+
+  @@index([storeId, name])
+}
+
+model Transaction {
+  id            String   @id @default(uuid())
+  storeId       String
+  customerId    String
+  type          String   // UDHAAR | PAYMENT
+  amount        Float
+  currency      String   @default("INR")
+  balanceAfter  Float
+  notes         String?
+  referenceDate DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  store         Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, customerId])
+  @@index([storeId, createdAt])
+}
+
+model StockAdjustment {
+  id          String   @id @default(uuid())
+  storeId     String
+  productId   String
+  type        String   // ADD | REMOVE
+  quantity    Float
+  unit        String
+  reason      String?  // sale, wastage, adjustment, damaged
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  store       Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, productId])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  storeId   String
+  action    String
+  details   String?
+  userId    String?
+  createdAt DateTime @default(now())
+
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+}

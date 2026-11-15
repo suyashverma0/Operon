@@ -1,0 +1,6 @@
+{
+  "name": "@openron/config",
+  "version": "1.0.0",
+  "private": true,
+  "main": "eslint/index.js"
+}
