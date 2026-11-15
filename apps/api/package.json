@@ -13,7 +13,7 @@
     "prisma:push": "prisma db push"
   },
   "dependencies": {
-    "@google/genai": "^0.1.2",
+    "@google/genai": "^3.3.0",
     "@google/generative-ai": "^0.21.0",
     "@openron/shared": "workspace:*",
     "@prisma/client": "^5.22.0",

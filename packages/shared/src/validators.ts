@@ -91,14 +91,16 @@ export function normalizeHindiNumber(text: string): number | null {
 
   // Handle "X sau" e.g. "paanch sau" = 500, "do sau" = 200, "char sau" = 400
   const sauMatch = cleaned.match(/^([a-z]+)\s+sau$/);
-  if (sauMatch && directMap[sauMatch[1]]) {
-    return directMap[sauMatch[1]] * 100;
+  if (sauMatch && sauMatch[1]) {
+    const val = directMap[sauMatch[1]];
+    if (val !== undefined) return val * 100;
   }
 
   // Handle "X hazaar" e.g. "teen hazaar" = 3000
   const hazarMatch = cleaned.match(/^([a-z]+)\s+haza?ar$/);
-  if (hazarMatch && directMap[hazarMatch[1]]) {
-    return directMap[hazarMatch[1]] * 1000;
+  if (hazarMatch && hazarMatch[1]) {
+    const val = directMap[hazarMatch[1]];
+    if (val !== undefined) return val * 1000;
   }
 
   // Handle standard digit match

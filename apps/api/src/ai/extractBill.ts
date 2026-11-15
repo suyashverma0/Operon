@@ -1,4 +1,4 @@
-import { callGeminiWithRetry } from './gemini';
+import { getGeminiClient, cleanJsonResponse } from './gemini';
 import { logger } from '../utils/logger';
 
 export interface ExtractedBillItem {
@@ -37,8 +37,11 @@ Format:
 Return ONLY valid JSON.`;
 
   try {
-    const raw = await callGeminiWithRetry(prompt);
-    return JSON.parse(raw);
+    const raw = await getGeminiClient().generate({
+      systemPrompt: 'You are an OCR and bill parser for Indian retail stores. Output only valid JSON.',
+      userPrompt: prompt,
+    });
+    return JSON.parse(cleanJsonResponse(raw));
   } catch (err) {
     logger.error('Bill extraction failed:', err);
     return null;

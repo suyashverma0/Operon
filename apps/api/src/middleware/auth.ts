@@ -43,8 +43,16 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   }
 
   const token = authHeader.split(' ')[1];
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: 'Authentication token required.',
+      code: 'UNAUTHORIZED',
+    });
+  }
+
   try {
-    const decoded = jwt.verify(token, ENV.JWT_SECRET) as AuthenticatedUser;
+    const decoded = jwt.verify(token, ENV.JWT_SECRET as string) as unknown as AuthenticatedUser;
     req.user = decoded;
     req.storeId = decoded.storeId;
     next();

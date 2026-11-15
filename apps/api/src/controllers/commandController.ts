@@ -2,9 +2,10 @@ import { Request, Response } from 'express';
 import {
   validateParseCommandInput,
   validateExecuteCommandInput,
-  ParsedCommand,
 } from '@openron/shared';
 import { parseCommand } from '../ai/parseCommand';
+import { getGeminiClient } from '../ai/gemini';
+import { ParseContext, ParseOutcome } from '../ai/types';
 import { CustomerService } from '../services/customerService';
 import { ProductService } from '../services/productService';
 import { TransactionService } from '../services/transactionService';
@@ -35,50 +36,62 @@ export class CommandController {
         ProductService.findCandidates(storeId),
       ]);
 
-      const parsed: ParsedCommand = await parseCommand(command, {
-        storeId,
-        referenceDate: new Date().toISOString().split('T')[0],
+      const parseContext: ParseContext = {
+        referenceDate: new Date().toISOString(),
         timezone: 'Asia/Kolkata',
-        customerCandidates,
-        productCandidates,
+        customers: customerCandidates.map((c) => ({ id: c.id, name: c.name })),
+        products: productCandidates.map((p) => ({ id: p.id, name: p.name, unit: p.unit as any })),
+        requestId: `req-${Date.now()}`,
+      };
+
+      const outcome: ParseOutcome = await parseCommand(command, parseContext, {
+        client: getGeminiClient(),
+        logger: {
+          info: (f, m) => logger.info(m, f),
+          warn: (f, m) => logger.warn(m, f),
+          error: (f, m) => logger.error(m, f),
+        },
       });
 
-      // Prepare preview description and confirmation requirement
+      if (outcome.status === 'clarification') {
+        return res.status(200).json({
+          success: false,
+          outcome,
+          clarify: outcome.clarify,
+          reason: outcome.reason,
+          preview: outcome.clarify,
+          requiresConfirmation: false,
+        });
+      }
+
+      const parsed = outcome.command;
       let preview = '';
-      let requiresConfirmation = false;
 
       switch (parsed.action) {
         case 'add_udhaar':
           preview = `${parsed.customerName} ko ₹${parsed.amount} ka udhaar jodna hai.`;
-          requiresConfirmation = true;
           break;
         case 'record_payment':
           preview = `${parsed.customerName} se ₹${parsed.amount} payment prapt darj karni hai.`;
-          requiresConfirmation = true;
           break;
         case 'add_stock':
           preview = `${parsed.productName} ke ${parsed.quantity} ${parsed.unit} stock mein jodna hai.`;
-          requiresConfirmation = true;
           break;
         case 'remove_stock':
           preview = `${parsed.productName} ke ${parsed.quantity} ${parsed.unit} stock se ghatana hai (${parsed.reason || 'sale'}).`;
-          requiresConfirmation = true;
           break;
         case 'query':
           preview = `Jankari prapt ki ja rahi hai (${parsed.queryType}).`;
-          requiresConfirmation = false;
-          break;
-        case 'needs_clarification':
-          preview = parsed.clarify;
-          requiresConfirmation = false;
           break;
       }
 
       return res.status(200).json({
         success: true,
+        outcome,
         parsed,
+        resolved: outcome.resolved,
         preview,
-        requiresConfirmation,
+        requiresConfirmation: outcome.requiresConfirmation,
       });
     } catch (err: any) {
       logger.error('Error during command parsing:', err);
@@ -266,34 +279,45 @@ export class CommandController {
         ProductService.findCandidates(storeId),
       ]);
 
-      const parsed: ParsedCommand = await parseCommand(command, {
-        storeId,
-        referenceDate: new Date().toISOString().split('T')[0],
+      const parseContext: ParseContext = {
+        referenceDate: new Date().toISOString(),
         timezone: 'Asia/Kolkata',
-        customerCandidates,
-        productCandidates,
+        customers: customerCandidates.map((c) => ({ id: c.id, name: c.name })),
+        products: productCandidates.map((p) => ({ id: p.id, name: p.name, unit: p.unit as any })),
+        requestId: `req-${Date.now()}`,
+      };
+
+      const outcome = await parseCommand(command, parseContext, {
+        client: getGeminiClient(),
+        logger: {
+          info: (f, m) => logger.info(m, f),
+          warn: (f, m) => logger.warn(m, f),
+          error: (f, m) => logger.error(m, f),
+        },
       });
 
-      if (parsed.action === 'needs_clarification') {
+      if (outcome.status === 'clarification') {
         return res.status(200).json({
           success: false,
-          action: parsed.action,
-          clarify: parsed.clarify,
-          message: parsed.clarify,
-          parsed,
+          outcome,
+          clarify: outcome.clarify,
+          reason: outcome.reason,
+          message: outcome.clarify,
         });
       }
 
-      if (autoExecute) {
-        // Forward to execution
+      const parsed = outcome.command;
+
+      if (autoExecute || !outcome.requiresConfirmation) {
         req.body = { parsedCommand: parsed, confirmed: true };
         return CommandController.execute(req, res);
       }
 
       return res.status(200).json({
         success: true,
-        action: parsed.action,
+        outcome,
         parsed,
+        resolved: outcome.resolved,
         requiresConfirmation: true,
       });
     } catch (err: any) {

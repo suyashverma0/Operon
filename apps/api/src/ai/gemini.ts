@@ -1,70 +1,120 @@
-import { ENV } from '../config/env';
-import { logger } from '../utils/logger';
-
-export interface GeminiClientInterface {
-  generateText(prompt: string): Promise<string>;
+export interface LlmRequest {
+  systemPrompt: string;
+  userPrompt: string;
 }
 
-class RealGeminiClient implements GeminiClientInterface {
-  private apiKey: string;
-  private modelName: string;
+export interface LlmClient {
+  generate(req: LlmRequest): Promise<string>;
+}
 
-  constructor(apiKey: string, modelName = 'gemini-2.5-flash') {
-    this.apiKey = apiKey;
-    this.modelName = modelName;
+export class GeminiError extends Error {
+  public retryable: boolean;
+  public status?: number;
+
+  constructor(message: string, retryable: boolean, status?: number) {
+    super(message);
+    this.name = 'GeminiError';
+    this.retryable = retryable;
+    this.status = status;
   }
+}
 
-  async generateText(prompt: string): Promise<string> {
-    if (!this.apiKey) {
-      throw new Error('GEMINI_API_KEY is not configured.');
-    }
+export interface CreateGeminiClientOptions {
+  apiKey: string;
+  model?: string;
+  fetchImpl?: typeof fetch;
+}
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.modelName}:generateContent?key=${this.apiKey}`;
-    
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [{ text: prompt }],
+export function createGeminiClient(options: CreateGeminiClientOptions): LlmClient {
+  const { apiKey, model = 'gemini-2.5-flash', fetchImpl = fetch } = options;
+
+  return {
+    async generate(req: LlmRequest): Promise<string> {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
+      let response: Response;
+      try {
+        response = await fetchImpl(url, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-goog-api-key': apiKey,
           },
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          topP: 0.8,
-          topK: 40,
-        },
-      }),
-    });
+          body: JSON.stringify({
+            systemInstruction: {
+              parts: [{ text: req.systemPrompt }],
+            },
+            contents: [
+              {
+                role: 'user',
+                parts: [{ text: req.userPrompt }],
+              },
+            ],
+            generationConfig: {
+              temperature: 0,
+              responseMimeType: 'application/json',
+            },
+          }),
+        });
+      } catch (err: any) {
+        // Network failure or AbortError are retryable
+        throw new GeminiError('Gemini network request failed', true);
+      }
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Gemini API error (${response.status}): ${errorText}`);
-    }
+      if (!response.ok) {
+        const isRetryable =
+          response.status === 429 ||
+          response.status === 500 ||
+          response.status === 503 ||
+          response.status >= 500;
 
-    const data: any = await response.json();
-    const candidateText =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    return candidateText;
+        // Never leak secrets or raw error body in the message
+        throw new GeminiError(`Gemini HTTP ${response.status}`, isRetryable, response.status);
+      }
+
+      const data: any = await response.json();
+
+      if (data?.promptFeedback?.blockReason) {
+        throw new GeminiError(
+          `Gemini generation blocked: ${data.promptFeedback.blockReason}`,
+          false
+        );
+      }
+
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text || typeof text !== 'string') {
+        throw new GeminiError('Empty response from Gemini', false);
+      }
+
+      return text;
+    },
+  };
+}
+
+export function createGeminiClientFromEnv(
+  env: Record<string, string | undefined> = process.env
+): LlmClient {
+  const apiKey = env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY environment variable is required');
   }
+  return createGeminiClient({ apiKey });
 }
 
-let activeGeminiClient: GeminiClientInterface = new RealGeminiClient(ENV.GEMINI_API_KEY);
+// Helpers for backward compatibility or simple use cases
+let defaultClient: LlmClient | null = null;
 
-export function setGeminiClient(client: GeminiClientInterface) {
-  activeGeminiClient = client;
+export function getGeminiClient(): LlmClient {
+  if (!defaultClient) {
+    defaultClient = createGeminiClientFromEnv();
+  }
+  return defaultClient;
 }
 
-export function getGeminiClient(): GeminiClientInterface {
-  return activeGeminiClient;
+export function setGeminiClient(client: LlmClient) {
+  defaultClient = client;
 }
 
-/**
- * Strips code fences like ```json ... ``` or ``` ... ``` from LLM text.
- */
 export function cleanJsonResponse(raw: string): string {
   let cleaned = raw.trim();
   if (cleaned.startsWith('```json')) {
@@ -78,38 +128,4 @@ export function cleanJsonResponse(raw: string): string {
   }
 
   return cleaned.trim();
-}
-
-/**
- * Calls Gemini with timeout and retry logic.
- */
-export async function callGeminiWithRetry(
-  prompt: string,
-  options: { timeoutMs?: number; maxRetries?: number } = {}
-): Promise<string> {
-  const timeoutMs = options.timeoutMs ?? 10000;
-  const maxRetries = options.maxRetries ?? 2;
-
-  let lastError: any;
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`Gemini request timed out after ${timeoutMs}ms`)), timeoutMs)
-      );
-
-      const generatePromise = activeGeminiClient.generateText(prompt);
-      const result = await Promise.race([generatePromise, timeoutPromise]);
-      return cleanJsonResponse(result);
-    } catch (err: any) {
-      lastError = err;
-      logger.warn(`Gemini call attempt ${attempt + 1} failed: ${err.message}`);
-      if (attempt < maxRetries) {
-        // Exponential backoff: 300ms, 600ms
-        await new Promise((res) => setTimeout(res, 300 * Math.pow(2, attempt)));
-      }
-    }
-  }
-
-  throw lastError;
 }
