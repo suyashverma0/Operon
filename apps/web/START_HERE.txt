@@ -1,0 +1,4 @@
+1) Is folder mein terminal kholo
+2) npm install
+3) npm run dev
+4) Browser mein http://localhost:5173 kholo (phone view: F12 -> device icon)
